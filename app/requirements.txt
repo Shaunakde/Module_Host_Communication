@@ -1,0 +1,4 @@
+redis==5.0.8
+protobuf==5.27.3
+grpcio-tools==1.65.5
+
