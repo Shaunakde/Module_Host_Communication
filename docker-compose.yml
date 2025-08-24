@@ -1,10 +1,38 @@
 version: "3.9"
 
 services:
+  gui:
+    build: ./gui
+    container_name: gui-app
+    # Host networking works only on Linux
+    network_mode: host
+    ports:
+      - "6379:6379"
+    stdin_open: true     # keep STDIN open for TTY apps
+    tty: true            # allocate a TTY
+    working_dir: /app
+    volumes:
+      - ./gui:/app              # dev: live code changes
+    environment:
+      - DISPLAY=${DISPLAY:-}    # Linux X11
+    command: python tui.py      # adjust if needed
+
+  module:
+    build: ./module
+#    image: golang:1.22
+    working_dir: /app
+    ports:
+      - "6379:6379"
+    network_mode: host
+    volumes:
+      - ./module:/app
+    command: sh -c "go mod download && go run ."
+
   redis:
     image: redis:7
     ports:
       - "6379:6379"
+    network_mode: host
     command: ["redis-server", "--appendonly", "yes"]
     healthcheck:
       test: ["CMD", "redis-cli", "PING"]
@@ -14,23 +42,23 @@ services:
     volumes:
       - redis_data:/data
 
-  py-worker:
-    build:
-      context: ./app
-      dockerfile: Dockerfile
-    depends_on:
-      redis:
-        condition: service_healthy
-    environment:
-      REDIS_URL: redis://redis:6379
+  #py-worker:
+  #  build:
+  #    context: ./app
+  #    dockerfile: Dockerfile
+  #  depends_on:
+  #    redis:
+  #      condition: service_healthy
+  #  environment:
+  #    REDIS_URL: redis://redis:6379
       # choose "publisher" or "consumer" (or run two replicas with different roles)
-      ROLE: publisher
-      STREAM_KEY: telemetry
-      GROUP_NAME: telemetry_group
-      CONSUMER_NAME: worker-1
-    volumes:
-      - ./app:/usr/src/app:cached
-    command: ["python", "-m", "main"]
+  #    ROLE: publisher
+  #    STREAM_KEY: telemetry
+  #    GROUP_NAME: telemetry_group
+  #    CONSUMER_NAME: worker-1
+  #  volumes:
+  #    - ./app:/usr/src/app:cached
+  #  command: ["python", "-m", "main"]
     # uncomment to run multiple consumers:
     # deploy:
     #   replicas: 2
