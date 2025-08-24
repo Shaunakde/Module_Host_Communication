@@ -150,7 +150,10 @@ func main() {
 			}
 			logger.Plain("Redis connected: ", pong, "    ")
 			ms_state_repr, err := state.StructToMap(ms)
-			logger.PubModuleQ(ctx, rdb, "", ms_state_repr, "")
+			if err != nil {
+				fmt.Println("Error converting state to struct: ", err)
+			}
+			logger.PubModuleQ(ctx, rdb, "", ms_state_repr, "MODULE_Q")
 
 		}
 	}
