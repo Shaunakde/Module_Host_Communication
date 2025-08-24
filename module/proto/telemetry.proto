@@ -1,0 +1,11 @@
+syntax = "proto3";
+package demo;
+
+// A tiny demo message
+message Telemetry {
+  int64 id           = 1;
+  string source      = 2;
+  double value       = 3;
+  int64 timestamp_ms = 4;
+}
+
