@@ -142,10 +142,59 @@ func HealthCheck(ms *ModuleState, ctx context.Context, rdb *redis.Client) {
 
 }
 
+func (ms *ModuleState) _isSafe() bool {
+	if ms.BatteryLevel < 20 {
+		return false
+	}
+	if ms.Temperature <= 60.0 {
+		return false
+	}
+	return true
+}
+
+func PerformThrust(ms *ModuleState, ctx context.Context, rdb *redis.Client) {
+	logger.Plain("Performing thrust...")
+	return_payload := []string{}
+	return_map := map[string]interface{}{}
+
+	logger.Plain(fmt.Sprintf("Starting Thrust: %s", ms.Status))
+	ms.Status = "ACTIVE"
+	return_map["type"] = "RET_VALUE"
+
+	for i := 0; i <= 100; i++ {
+
+		fmt.Printf("Processing step %d...\n", i)
+		if !ms._isSafe() {
+			logger.Warning("Thrust aborted: unsafe conditions detected.")
+			return_payload = append(return_payload, "THRUST ABORTED")
+			return_map["return_params"] = return_payload
+			logger.PubModuleQ(ctx, rdb, "Thrust aborted", StructToMap(ms), "MODULE_Q", return_map)
+			return
+		}
+
+		if i%20 == 0 {
+			return_payload = append(return_payload, fmt.Sprintf("Thrust in prog: %d%%", i))
+			return_map["return_params"] = return_payload
+			logger.PubModuleQ(ctx, rdb, "Thrust in progress", StructToMap(ms), "MODULE_Q", return_map)
+		}
+		time.Sleep(50 * time.Millisecond) // Sleep for 500ms to simulate work
+
+	} // Thrust processing loop
+
+	return_payload = append(return_payload, "Thrust Complete")
+	return_map["return_params"] = return_payload
+	logger.PubModuleQ(ctx, rdb, "Thrust Done", StructToMap(ms), "MODULE_Q", return_map)
+	fmt.Println("Processing complete!")
+
+	ms.Status = "IDLE"
+
+}
+
 func InspectPanel(ms *ModuleState, ctx context.Context, rdb *redis.Client) {
 
 	return_payload := []string{}
 	return_map := map[string]interface{}{}
+	return_map["type"] = "RET_VALUE"
 
 	// Logic to inspect the panel
 	// logger.PubModuleQ(ctx, rdb, "", ms_state_repr, "MODULE_Q")
@@ -156,15 +205,23 @@ func InspectPanel(ms *ModuleState, ctx context.Context, rdb *redis.Client) {
 
 	if ms.Status != "IDLE" {
 		logger.Warning(fmt.Sprintf("Cannot inspect panel while module is not IDLE. Current status: %s", ms.Status))
+		return_payload = append(return_payload, "INS ABORTED: Mod not IDLE")
+		return_map["return_params"] = return_payload
+		logger.PubModuleQ(ctx, rdb, "Panel inspection started", StructToMap(ms), "MODULE_Q", return_map)
 		return
 	}
 
-	logger.PubModuleQ(ctx, rdb, "Panel inspection started", StructToMap(ms), "MODULE_Q", map[string]interface{}{})
+	//return_payload = append(return_payload, "Panel Inspection Starting")
+	//return_map["return_params"] = return_payload
+	//logger.PubModuleQ(ctx, rdb, "Panel inspection started", StructToMap(ms), "MODULE_Q", return_map)
 	ms.Status = "ACTIVE"
 
-	logger.PubModuleQ(ctx, rdb, "Taking Photgraph of Panel", StructToMap(ms), "MODULE_Q", map[string]interface{}{})
+	//return_payload = append(return_payload, "Taking Photo")
+	//return_map["return_params"] = return_payload
+	//logger.PubModuleQ(ctx, rdb, "Taking Photgraph of Panel", StructToMap(ms), "MODULE_Q", return_map)
 	n := rand.Intn(2000-200+1) + 200                // Random time to do this between 200ms and 2s
 	time.Sleep(time.Duration(n) * time.Millisecond) // Simulate time taken to take a photo
+
 	return_payload = append(return_payload, "OK")
 	return_payload = append(return_payload, "image_captured")
 	return_payload = append(return_payload, fmt.Sprintf("uri://%s", uuid.New().String()))
@@ -176,6 +233,29 @@ func InspectPanel(ms *ModuleState, ctx context.Context, rdb *redis.Client) {
 	logger.PubModuleQ(ctx, rdb, "Photograph taken", StructToMap(ms), "MODULE_Q", return_map)
 
 	ms.Status = "IDLE"
+}
+
+func ResumePanel(ms *ModuleState, ctx context.Context, rdb *redis.Client) {
+	return_payload := []string{}
+	return_map := map[string]interface{}{}
+
+	return_payload = append(return_payload, "Preparing to resume")
+
+	// Logic to resume panel operations
+	if ms._isSafe() {
+		return_map["type"] = "RET_VALUE"
+		return_payload = append(return_payload, "Safe to resume")
+		return_map["return_params"] = return_payload
+
+		logger.PubModuleQ(ctx, rdb, "Resuming panel operations", StructToMap(ms), "MODULE_Q", return_map)
+		ms.Status = "IDLE"
+	} else {
+		logger.Warning("Cannot resume panel operations: unsafe conditions detected.")
+		return_map["type"] = "RET_VALUE"
+		return_payload = append(return_payload, "Unsafe to resume")
+		return_map["return_params"] = return_payload
+		logger.PubModuleQ(ctx, rdb, "Can not resume panel operations", StructToMap(ms), "MODULE_Q", return_map)
+	}
 }
 
 func ProcessCommand(cmd command.Command, ms *ModuleState, ctx context.Context, rdb *redis.Client) {
@@ -193,16 +273,31 @@ func ProcessCommand(cmd command.Command, ms *ModuleState, ctx context.Context, r
 		InspectPanel(ms, ctx, rdb)
 
 		// Add logic to inspect panel
-	case "THRUST":
+	case "PERFORM_MANEUVER":
 		logger.Info("Activating thrust...")
+		PerformThrust(ms, ctx, rdb)
 		// Add logic to activate thrust
 	case "RESUME":
 		logger.Info("Resuming operations...")
 		// Add logic to resume operations
+		ResumePanel(ms, ctx, rdb)
 
 	case "HEALTH_CHECK":
 		logger.Info("Performing health check...")
 		HealthCheck(ms, ctx, rdb)
+
+	case "HEAT_AND_CLEAR":
+		logger.Info("Heating and Clearning module ...")
+		ms.BatteryLevel = 100
+		ms.Temperature = 80.0
+		ResumePanel(ms, ctx, rdb)
+
+	case "INJECT_FAULT":
+		logger.Info("Injecting fault into system...")
+		//InjectFault(ms, ctx, rdb)
+		ms.Temperature = 0.0
+		ms.BatteryLevel = 0
+		ms.Status = "SAFE"
 
 	default:
 		logger.Error("Unknown command:", cmd.CMD)

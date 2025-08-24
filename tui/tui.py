@@ -14,6 +14,9 @@ from redis.asyncio import Redis as AsyncRedis
 CHANNEL = "MODULE_Q"
 class HostGUI(App):
     CSS = """
+    Button {
+        height: 3;
+    }
     Screen {
         layout: horizontal;
     }
@@ -92,7 +95,8 @@ class HostGUI(App):
                 # Clear return pane
                 self.return_widget.clear()
                 self.return_widget.write(f"{datetime.datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} - RX")
-                return_params = data.get("return_params")
+                return_params = data.get("return_params", [])
+
                 for param in return_params:
                     self.return_widget.write(f"[green]Ret: {param}[/green]") ###################
 
@@ -237,7 +241,10 @@ class HostGUI(App):
                         with HorizontalGroup():
                             yield Label("N Beats:")
                             yield Input(placeholder="5", value="5", type="integer", id="n_beats_input")
- 
+                    yield Button("Inject Fault", id="INJECT_FAULT")
+                    yield Button("Resume", id="RESUME")
+                    yield Button("Heat and Clear", id="HEAT_AND_CLEAR")
+
             # Right pane with TextLog
             with Vertical(classes="pane", id="OutputPane"):
                 yield RichLog(classes="pane", id="log", markup=True, max_lines=150)
@@ -266,6 +273,12 @@ class HostGUI(App):
         elif event.button.id == "PERFORM_MANEUVER":
             log.write("[red]Perform Maneuver button pressed![/red]")
 
+            # Send a Redis Subsciption to the CMD_Q pubsub"
+            cmd = self._create_command("PERFORM_MANEUVER")
+            json_payload = json.dumps(cmd)
+            self.r.publish("CMD_Q",json_payload)
+            log.write("[green] Starting Command: Perform Maneuver [/green]")
+
         elif event.button.id == "HEALTH_CHECK":
             self.host_debug_widget.update("HEALTH_CHECK clicked")
             log.write("[red]Health Check button pressed![/red]")
@@ -276,6 +289,35 @@ class HostGUI(App):
             self.r.publish("CMD_Q",json_payload)
             log.write("[green] Starting Command: Health Check [/green]")
 
+        elif event.button.id == "INJECT_FAULT":
+            self.host_debug_widget.update("INJECT_FAULT clicked")
+            log.write("[red]Inject Fault button pressed![/red]")
+
+            # Send a Redis Subsciption to the CMD_Q pubsub"
+            cmd = self._create_command("INJECT_FAULT")
+            json_payload = json.dumps(cmd)
+            self.r.publish("CMD_Q",json_payload)
+            log.write("[green] Starting Command: Inject Fault [/green]")
+        
+        elif event.button.id == "RESUME":
+            self.host_debug_widget.update("RESUME clicked")
+            log.write("[red]Resume button pressed![/red]")
+
+            # Send a Redis Subsciption to the CMD_Q pubsub"
+            cmd = self._create_command("RESUME")
+            json_payload = json.dumps(cmd)
+            self.r.publish("CMD_Q",json_payload)
+            log.write("[green] Starting Command: Resume [/green]")
+
+        elif event.button.id == "HEAT_AND_CLEAR":
+            self.host_debug_widget.update("HEAT_AND_CLEAR clicked")
+            log.write("[red]Heat and Clear button pressed![/red]")
+
+            # Send a Redis Subsciption to the CMD_Q pubsub"
+            cmd = self._create_command("HEAT_AND_CLEAR")
+            json_payload = json.dumps(cmd)
+            self.r.publish("CMD_Q",json_payload)
+            log.write("[green] Starting Command: Heat and Clear [/green]")
 
 
 if __name__ == "__main__":
