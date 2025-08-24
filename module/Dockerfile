@@ -1,25 +1,33 @@
-FROM python:3.11-slim
+# --- Build stage --------------------------------------------------------------
+FROM golang:1.25-alpine AS build
 
-WORKDIR /usr/src/app
+# Install build tools (git for go-get, ca-certificates for TLS during build)
+RUN apk add --no-cache git ca-certificates
 
-# System deps for building/grpcio-tools (no heavy toolchains needed)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    bash curl ca-certificates \
-  && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
 
-# Copy deps early for better caching
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Enable Go modules and better caching: copy mod files first
+COPY go.mod go.sum ./
+RUN go mod download
 
-# Copy source
+# Copy the rest of the source
 COPY . .
 
-# Generate Python code from .proto at build-time (optional; you can also check gen files into repo)
-RUN python -m grpc_tools.protoc \
-    -I. \
-    --python_out=. \
-    proto/telemetry.proto
+# Build a static binary (no CGO) for Linux; inject version if you want
+#ARG TARGETOS=linux
+#ARG TARGETARCH=amd64
+#ARG APP_NAME=app
+#ARG VERSION=dev
+#ENV CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH
 
-# Default command (overridden by compose)
-CMD ["python", "-m", "main"]
+# -s -w strips symbols to reduce size
+#RUN go build .
+
+# If your service listens on a port, expose it (optional)
+#EXPOSE 6379
+
+# Run as non-root (distroless uses nonroot user)
+#USER nonroot:nonroot
+
+CMD ["go", "run", "."]
 
