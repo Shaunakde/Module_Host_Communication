@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -20,6 +21,15 @@ func timestamp() string {
 func Info(a ...interface{}) {
 	fmt.Print("\r\n")
 	fmt.Print("\033[33m")
+	fmt.Printf("[%s] ", timestamp())
+	fmt.Print(a...)
+	fmt.Print("\033[0m")
+}
+
+// Info prints informational messages in yellow
+func Warning(a ...interface{}) {
+	fmt.Print("\r\n")
+	fmt.Print("\033[38;5;208m")
 	fmt.Printf("[%s] ", timestamp())
 	fmt.Print(a...)
 	fmt.Print("\033[0m")
@@ -55,7 +65,8 @@ func PubModuleQ(
 	rdb *redis.Client,
 	message string,
 	system_state map[string]interface{},
-	channel string) (int64, error) {
+	channel string,
+	payload_input map[string]interface{}) (int64, error) {
 
 	// Let's try logging to redis
 	// Publish JSON to channel
@@ -69,12 +80,19 @@ func PubModuleQ(
 	// Example payload
 	payload := map[string]interface{}{
 		"msg_id": "12345",
-		"action": "HEALTH_CHECK",
-		"body": map[string]interface{}{
-			"battery": 85,
-			"temp":    42.5,
-		},
+		//"action":       "HEALTH_CHECK",
+		"system_state": system_state,
+		"message":      message,
+		"msg_time":     time.Now().Format(time.RFC3339),
+		//"body": map[string]interface{}{
+		//	"battery": 85,
+		//	"temp":    42.5,
+		//},
 	}
+
+	// Merge payload_input into payload
+	// Overwrite or add new keys
+	maps.Copy(payload, payload_input)
 
 	// Marshal to JSON
 	data, err := json.Marshal(payload)

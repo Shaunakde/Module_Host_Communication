@@ -5,6 +5,7 @@ import (
 	"communication_module/logger"
 	"communication_module/pubsub"
 	"communication_module/state"
+	"math/rand"
 	"os/signal"
 	"syscall"
 
@@ -19,8 +20,15 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// Struct to hold module state
+// LOCALS -------------------------------------------------
 var ms state.ModuleState
+var lastHeartbeats []string
+var unchangedTicks int
+
+//---------------------------------------------------------
+
+//var ms *state.ModuleState
+//var ms := state.Initialize()
 
 // startHeartbeat launches a 500ms heartbeat that logs to stdout and Redis.
 // It SETs "heartbeat:latest" with a TTL and also PUBLISHes on "heartbeat".
@@ -64,6 +72,9 @@ func startHeartbeat(ctx context.Context, rdb *redis.Client, quit <-chan struct{}
 
 func main() {
 
+	// Initialize module state
+	ms := state.Initialize()
+
 	// Context for Redis ops
 	// --------- [START Redis Connection] ---------
 	ctx := context.Background()
@@ -83,7 +94,7 @@ func main() {
 	//defer func() {
 	//	_ = term.Restore(int(os.Stdin.Fd()), oldState)
 	//}()
-	fmt.Println("Press 'q' and hit enter to quit - or hit CTRL+C.\r\n")
+	fmt.Println("Press 'q' and hit enter to quit - or hit CTRL+C.")
 
 	quit := make(chan struct{})
 	var once sync.Once
@@ -121,44 +132,122 @@ func main() {
 
 	// Timers etc
 	// --------- [TIMERS and HEARTBEAT] ---------
-	ticker := time.NewTicker(3000 * time.Millisecond)
-	defer ticker.Stop()
+	ticker_status := time.NewTicker(10000 * time.Millisecond)
+	ticker_heartbeat := time.NewTicker(500 * time.Millisecond)
+	defer ticker_status.Stop()
+	defer ticker_heartbeat.Stop()
 
 	// Start heartbeat
-	go heartbeat(ctx, rdb, "module:heartbeat", 5000*time.Millisecond)
+	////go heartbeat(ctx, rdb, "module:heartbeat", 5000*time.Millisecond)
 	// --------- [END TIMERS and HEARTBEAT] ---------
 
 	// --------- [START Pub Sub: Command] ---------
-	stop, err := pubsub.SubscribeAsync(ctx, rdb, []string{"CMD_Q"}, 4, 1024, recieveCommand)
+	stop, err := pubsub.SubscribeAsync(ctx, rdb, []string{"CMD_Q"}, 4, 1024, ms, recieveCommand)
 	if err != nil {
 		log.Fatalf("failed to subscribe: %v", err)
 	}
 	defer stop()
 	// --------- [END Pub Sub: Command] ---------
 
-	// --------- [START For Loop] ---------
+	// --------- [START Main Loop] ---------
 	for {
 		select {
+
 		case <-quit:
 			fmt.Println("\n\033[31m Quitting... \033[0m")
 			return
-		case <-ticker.C:
+
+		case <-ticker_status.C:
 			pong, err := rdb.Ping(ctx).Result()
 			if err != nil {
 				fmt.Println("\nCould not connect to Redis:", err)
 				return
 			}
 			logger.Plain("Redis connected: ", pong, "    ")
-			ms_state_repr, err := state.StructToMap(ms)
-			if err != nil {
-				fmt.Println("Error converting state to struct: ", err)
+			//ms_state_repr, err := state.StructToMap(ms)
+			ms_state_repr := state.StructToMap(ms)
+			//if err != nil {
+			//	fmt.Println("Error converting state to struct: ", err)
+			//}
+			// Let's also get battery and temperature to vary here at random
+			ms.BatteryLevel = ms.BatteryLevel - (rand.Int63n(10) - 5)
+			ms.Temperature = ms.Temperature - (rand.Float64()*10.0 - 5.0)
+			// Randomly clamp values to be reasonable
+			if ms.BatteryLevel < 0 {
+				ms.BatteryLevel = 0
 			}
-			logger.PubModuleQ(ctx, rdb, "", ms_state_repr, "MODULE_Q")
+			if ms.BatteryLevel > 100 {
+				ms.BatteryLevel = 80
+			}
+			if ms.Temperature < -50 {
+				ms.Temperature = -30
+			}
+			if ms.Temperature > 100 {
+				ms.Temperature = 80
+			}
+			logger.PubModuleQ(ctx, rdb, "STATUS", ms_state_repr, "MODULE_Q", map[string]interface{}{})
 
+		case <-ticker_heartbeat.C:
+			// Query last 10 host heartbeats
+			logger.Plain("Checking for host heartbeat")
+			heartbeats, err := rdb.LRange(ctx, "HOST_HEARTBEAT", 0, 9).Result()
+			if err != nil {
+				logger.Error("Error querying HOST_HEARTBEAT:", err)
+				continue
+			}
+
+			// Check if heartbeats have changed
+			if len(heartbeats) == len(lastHeartbeats) {
+				unchanged := true
+				for i := range heartbeats {
+					if heartbeats[i] != lastHeartbeats[i] {
+						unchanged = false
+						break
+					}
+				}
+				if unchanged {
+					unchangedTicks++
+				} else {
+					unchangedTicks = 0
+				}
+			}
+
+			lastHeartbeats = heartbeats
+			// React if unchanged for 3 ticks
+			if unchangedTicks > 3 {
+				logger.Error(
+					fmt.Sprintf("Host heartbeat has not updated for %d ticks!", unchangedTicks),
+				)
+				// Set System state to FAULT
+				ms.Status = "SAFE"
+				ms.LastUpdated = time.Now().Unix()
+				ms_state_repr := state.StructToMap(ms)
+				logger.PubModuleQ(ctx, rdb, "FAULT", ms_state_repr, "MODULE_Q", map[string]interface{}{})
+			} else if unchangedTicks == 0 {
+				logger.Plain("Host heartbeat is healthy.")
+				// Was the system in fault?
+				if ms.Status == "SAFE" {
+					logger.Info("System has recovered from fault.")
+					// ms.SetField("Status", "IDLE")   // This is nice, but too much generalization?
+					ms.SetStatus("IDLE")
+				}
+				// Set System state indicate healthy
+				ms.LastUpdated = time.Now().Unix()
+				//ms_state_repr := state.StructToMap(ms)
+			} else if unchangedTicks > 0 && unchangedTicks <= 3 {
+				// Warning state
+				ms.LastUpdated = time.Now().Unix()
+				ms_state_repr := state.StructToMap(ms)
+				logger.Info(
+					fmt.Sprintf("Host heartbeat unchanged for %d ticks.", unchangedTicks),
+				)
+				logger.PubModuleQ(ctx, rdb, "WARNING", ms_state_repr, "MODULE_Q", map[string]interface{}{})
+			}
 		}
 	}
+	// --------- [END Main Loop] ---------
 
-}
+} // End of func main()
 
 func heartbeat(ctx context.Context, rdb *redis.Client, key string, interval time.Duration) {
 	ticker := time.NewTicker(interval)
@@ -179,7 +268,7 @@ func heartbeat(ctx context.Context, rdb *redis.Client, key string, interval time
 	}
 }
 
-func recieveCommand(ctx context.Context, rdb *redis.Client, channel, payload string) error {
+func recieveCommand(ctx context.Context, rdb *redis.Client, channel, payload string, ms *state.ModuleState) error {
 	// Handle the incoming command
 	log.Printf("Received command on %s: %s", channel, payload)
 
@@ -187,7 +276,8 @@ func recieveCommand(ctx context.Context, rdb *redis.Client, channel, payload str
 	logger.Info("Parsed Command: ", cmd)
 	logger.Error("Command Counter: ", cmd.CMD_COUNTER)
 
-	state.ProcessCommand(cmd, &ms, ctx, rdb)
+	fmt.Print(ms)
+	state.ProcessCommand(cmd, ms, ctx, rdb)
 	return nil
 
 }

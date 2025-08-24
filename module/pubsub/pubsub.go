@@ -1,6 +1,7 @@
 package pubsub
 
 import (
+	"communication_module/state"
 	"context"
 	"log"
 	"runtime"
@@ -11,10 +12,10 @@ import (
 )
 
 // Handler is a callback for processing each Pub/Sub message.
-type Handler func(ctx context.Context, rdb *redis.Client, channel, payload string) error
+type Handler func(ctx context.Context, rdb *redis.Client, channel, payload string, ms *state.ModuleState) error
 
 // SubscribeAsync subscribes to Redis channels and dispatches messages to a worker pool.
-func SubscribeAsync(ctx context.Context, rdb *redis.Client, channels []string, workers, buf int, h Handler) (stop func(), err error) {
+func SubscribeAsync(ctx context.Context, rdb *redis.Client, channels []string, workers, buf int, ms *state.ModuleState, h Handler) (stop func(), err error) {
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
@@ -46,7 +47,7 @@ func SubscribeAsync(ctx context.Context, rdb *redis.Client, channels []string, w
 						return
 					}
 					callCtx, cancel := context.WithTimeout(workerCtx, 30*time.Second)
-					if err := h(callCtx, rdb, m.Channel, m.Payload); err != nil {
+					if err := h(callCtx, rdb, m.Channel, m.Payload, ms); err != nil {
 						log.Printf("[worker %d] handler error: %v (channel=%s)", id, err, m.Channel)
 					}
 
