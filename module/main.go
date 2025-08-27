@@ -223,6 +223,16 @@ func main() {
 				ms.LastUpdated = time.Now().Unix()
 				ms_state_repr := state.StructToMap(ms)
 				logger.PubModuleQ(ctx, rdb, "FAULT", ms_state_repr, "MODULE_Q", map[string]interface{}{})
+
+				//new code
+				return_payload := []string{}
+				return_map := map[string]interface{}{}
+
+				return_map["type"] = "RET_VALUE"
+				return_payload = append(return_payload, fmt.Sprintf("Missed %d heartbeats. Taking SAFE mode", unchangedTicks))
+				return_map["return_params"] = return_payload
+				logger.PubModuleQ(ctx, rdb, "Can not resume panel operations", state.StructToMap(ms), "MODULE_Q", return_map)
+
 			} else if unchangedTicks == 0 {
 				logger.Plain("Host heartbeat is healthy.")
 				// Was the system in fault?
