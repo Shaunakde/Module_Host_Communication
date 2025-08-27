@@ -149,6 +149,9 @@ func (ms *ModuleState) _isSafe() bool {
 	if ms.Temperature <= 60.0 {
 		return false
 	}
+	if ms.Status == "SAFE" {
+		return false
+	}
 	return true
 }
 

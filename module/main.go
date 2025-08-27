@@ -132,7 +132,7 @@ func main() {
 
 	// Timers etc
 	// --------- [TIMERS and HEARTBEAT] ---------
-	ticker_status := time.NewTicker(500 * time.Millisecond)
+	ticker_status := time.NewTicker(1000 * time.Millisecond)
 	ticker_heartbeat := time.NewTicker(500 * time.Millisecond)
 	defer ticker_status.Stop()
 	defer ticker_heartbeat.Stop()
