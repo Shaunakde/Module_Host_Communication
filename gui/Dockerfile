@@ -21,5 +21,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the rest of the source
 COPY . .
 
-CMD ["./entrypoint.sh"]
-#CMD ["python", "-m", "tui"]
+#CMD ["./entrypoint.sh"]
+CMD ["python", "-m", "tui"]
